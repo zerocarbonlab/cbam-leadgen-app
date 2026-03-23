@@ -16,56 +16,65 @@ CONTACT_EMAIL = "zerocarbonlab@gmail.com"
 CUSTOM_CSS = """
 <style>
     .block-container {
-        max-width: 1100px;
-        padding-top: 1.4rem;
-        padding-bottom: 2.2rem;
+        max-width: 1080px;
+        padding-top: 1.1rem;
+        padding-bottom: 1.6rem;
     }
     h1, h2, h3 {
         color: #1f2430;
         letter-spacing: -0.02em;
+        margin-bottom: 0.35rem;
     }
     .subtle {
-        color: #5d6a66;
-        font-size: 1.02rem;
-        line-height: 1.55;
-        margin-top: -0.3rem;
-        margin-bottom: 0.75rem;
+        color: #5f6c68;
+        font-size: 1rem;
+        line-height: 1.45;
+        margin-top: -0.1rem;
+        margin-bottom: 0.55rem;
     }
     .micro {
         color: #73807c;
         font-size: 0.92rem;
-        line-height: 1.5;
+        line-height: 1.45;
     }
     .tag {
         display: inline-block;
-        padding: 0.25rem 0.6rem;
+        padding: 0.23rem 0.58rem;
         border-radius: 999px;
         background: #eef5f1;
         color: #2f6b59;
         font-size: 0.82rem;
-        margin-right: 0.35rem;
-        margin-bottom: 0.35rem;
+        margin-right: 0.30rem;
+        margin-bottom: 0.30rem;
     }
     .result-box {
         border: 1px solid #e5e9e7;
-        border-radius: 16px;
+        border-radius: 14px;
         background: #ffffff;
-        padding: 1rem 1.05rem;
+        padding: 0.9rem 1rem;
     }
     .metric-label {
         color: #6f7b77;
-        font-size: 0.9rem;
-        margin-bottom: 0.2rem;
+        font-size: 0.88rem;
+        margin-bottom: 0.15rem;
     }
     .metric-value {
         color: #202733;
-        font-size: 1.85rem;
+        font-size: 1.75rem;
         font-weight: 700;
-        line-height: 1.15;
+        line-height: 1.1;
     }
-    .section-spacer {
-        margin-top: 0.8rem;
-        margin-bottom: 0.5rem;
+    .mini-cta {
+        border: 1px solid #e5e9e7;
+        border-radius: 14px;
+        background: #fbfcfc;
+        padding: 0.9rem 1rem;
+        margin-top: 0.55rem;
+        margin-bottom: 0.65rem;
+    }
+    .footer-note {
+        color: #74807c;
+        font-size: 0.92rem;
     }
 </style>
 """
@@ -141,7 +150,10 @@ def load_data():
         "factor_status": "",
         "definitive_period_primary_focus": "",
         "aggregated_goods_category": "",
+        "cbam_sector": "",
         "hs_code_prefix": "",
+        "methodology_note": "",
+        "rule_source": "",
     }
     for key, value in defaults.items():
         if key not in df.columns:
@@ -186,7 +198,7 @@ def build_tally_url(
 
 def find_matches(df, country, hs_code):
     code = clean_hs_code(hs_code)
-    if not code:
+    if not code or not country:
         return pd.DataFrame()
 
     subset = df[df["country"] == country].copy()
@@ -201,8 +213,6 @@ def find_matches(df, country, hs_code):
 def infer_default_country(countries):
     if not countries:
         return None
-
-    default_country = "China" if "China" in countries else countries[0]
 
     try:
         locale = getattr(st.context, "locale", None)
@@ -223,7 +233,21 @@ def infer_default_country(countries):
         if candidate in countries:
             return candidate
 
-    return default_country
+    return None
+
+def parse_quantity(qtext):
+    if qtext is None:
+        return None
+    qtext = str(qtext).strip().replace(",", "")
+    if qtext == "":
+        return None
+    try:
+        value = float(qtext)
+        if value <= 0:
+            return None
+        return value
+    except Exception:
+        return None
 
 def safe_num(row, *cols):
     for col in cols:
@@ -233,55 +257,44 @@ def safe_num(row, *cols):
                 return float(value)
     return None
 
-def detect_sector_text(row):
-    bits = [
-        str(row.get("aggregated_goods_category", "")),
-        str(row.get("product_name_final", "")),
-        str(row.get("lookup_display_message", "")),
-        str(row.get("definitive_period_primary_focus", "")),
-    ]
-    return " ".join(bits).lower()
-
-def choose_factor(row):
+def choose_definitive_factor(row):
+    """
+    Definitive regime (2026 onwards):
+    - Prefer the official 2026 default value field from the user's workbook.
+    - If unavailable, fall back by sector/focus:
+      * cement, fertilisers -> total
+      * iron_and_steel, aluminium, hydrogen, electricity -> direct
+      * then safe fallback to any available factor
+    """
+    factor_2026 = safe_num(row, "2026_default_value_including_markup")
     direct = safe_num(row, "calculator_direct_factor_tco2e_per_ton", "direct_emission_factor_tco2e_per_ton")
     indirect = safe_num(row, "calculator_indirect_factor_tco2e_per_ton", "indirect_emission_factor_tco2e_per_ton")
     total = safe_num(row, "calculator_total_factor_tco2e_per_ton", "total_emission_factor_tco2e_per_ton")
 
+    sector = str(row.get("cbam_sector", "")).strip().lower()
     focus = str(row.get("definitive_period_primary_focus", "")).strip().lower()
-    sector_text = detect_sector_text(row)
 
-    if "total" in focus and total is not None:
-        return total, "Total factor", "Uses total embedded emissions."
-    if "direct" in focus and direct is not None:
-        return direct, "Direct factor", "Uses direct embedded emissions."
-    if "indirect" in focus and indirect is not None:
-        return indirect, "Indirect factor", "Uses indirect embedded emissions."
+    if factor_2026 is not None:
+        return factor_2026, "2026 default value", "Uses the 2026 definitive default value from your workbook."
 
-    if "cement" in sector_text or "fertili" in sector_text:
+    if sector in {"cement", "fertilisers", "fertilizers"} or "direct and indirect" in focus:
         if total is not None:
-            return total, "Total factor", "Uses total embedded emissions."
+            return total, "Total factor", "Uses total embedded emissions for the definitive regime."
+        if direct is not None and indirect is not None:
+            return direct + indirect, "Total factor", "Computed as direct + indirect."
         if direct is not None:
             return direct, "Direct factor", "Total factor unavailable; using direct factor."
-    if "electricity" in sector_text:
+
+    if sector in {"iron_and_steel", "aluminium", "aluminum", "hydrogen", "electricity"} or "direct emissions" in focus:
         if direct is not None:
-            return direct, "Direct factor", "Electricity is treated with direct emissions only in the definitive regime."
-        if total is not None:
-            return total, "Total factor", "Direct factor unavailable; using total factor."
-    if "hydrogen" in sector_text:
-        if direct is not None:
-            return direct, "Direct factor", "Hydrogen uses direct emissions in the definitive regime."
-        if total is not None:
-            return total, "Total factor", "Direct factor unavailable; using total factor."
-    if any(x in sector_text for x in ["iron", "steel", "aluminium", "aluminum"]):
-        if direct is not None:
-            return direct, "Direct factor", "Uses direct embedded emissions."
+            return direct, "Direct factor", "Uses direct embedded emissions for the definitive regime."
         if total is not None:
             return total, "Total factor", "Direct factor unavailable; using total factor."
 
-    if direct is not None:
-        return direct, "Direct factor", "Defaulted to direct factor."
     if total is not None:
-        return total, "Total factor", "Direct factor unavailable; using total factor."
+        return total, "Total factor", "Fallback to total factor."
+    if direct is not None:
+        return direct, "Direct factor", "Fallback to direct factor."
     if indirect is not None:
         return indirect, "Indirect factor", "Only indirect factor available."
 
@@ -295,18 +308,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 st.markdown(
-    '<span class="tag">Fast screening</span>'
+    '<span class="tag">2026+ regime</span>'
     '<span class="tag">Country + HS code</span>'
     '<span class="tag">Email follow-up</span>',
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
 st.markdown("## Start your estimate")
 
 countries = sorted([c for c in df["country"].dropna().unique() if str(c).strip()])
 default_country = infer_default_country(countries)
-default_country_index = countries.index(default_country) if default_country in countries else 0
+default_country_index = countries.index(default_country) if default_country in countries else None
 
 left, right = st.columns([1.25, 1])
 
@@ -314,30 +326,56 @@ with left:
     country = st.selectbox(
         "Country of origin",
         countries,
-        index=default_country_index if countries else None
+        index=default_country_index,
+        placeholder="Select country"
     )
     hs_code = st.text_input("HS code", placeholder="e.g. 72026000")
 
 with right:
-    quantity = st.number_input(
-        "Quantity (tonnes)",
-        min_value=0.0,
-        value=1.0,
-        step=1.0
-    )
+    quantity_text = st.text_input("Quantity (tonnes)", placeholder="e.g. 10")
     st.write("")
     calculate = st.button("Estimate CBAM emissions", type="primary", width="stretch")
+
+# compact lead capture directly under estimate
+lead_url = build_tally_url(
+    TALLY_FORM_URL,
+    help_type="More accurate CBAM estimate",
+    country=country or "",
+    hs_code=hs_code or "",
+    quantity=quantity_text or "",
+    source="inline_lead_capture"
+)
+st.markdown('<div class="mini-cta">', unsafe_allow_html=True)
+st.markdown("Need a reporting-ready answer?")
+c1, c2 = st.columns(2)
+with c1:
+    st.link_button("Get a more accurate CBAM report", lead_url, width="stretch")
+with c2:
+    st.link_button("Email us directly", f"mailto:{CONTACT_EMAIL}", width="stretch")
+st.markdown('</div>', unsafe_allow_html=True)
 
 with st.expander("Methodology and limitations"):
     st.markdown(
         """
-- Uses screening-level default values
-- Not a final filing engine
-- Some products need classification or methodology review
+- Uses the 2026+ definitive-regime logic only
+- Prefers the workbook’s 2026 default value where available
+- Falls back by sector scope: cement/fertilisers = total; iron and steel/aluminium/hydrogen = direct
+- Screening tool only, not a final filing engine
         """
     )
 
 if calculate:
+    quantity = parse_quantity(quantity_text)
+    if not country:
+        st.error("Please select a country.")
+        st.stop()
+    if not clean_hs_code(hs_code):
+        st.error("Please enter an HS code.")
+        st.stop()
+    if quantity is None:
+        st.error("Please enter a valid quantity in tonnes, for example 10.")
+        st.stop()
+
     matches = find_matches(df, country, hs_code)
 
     if matches.empty:
@@ -364,7 +402,7 @@ if calculate:
             row = matches.iloc[0]
 
         ready = str(row.get("calculator_ready_flag", "")).strip().lower() == "yes"
-        factor_value, factor_label, factor_note = choose_factor(row)
+        factor_value, factor_label, factor_note = choose_definitive_factor(row)
 
         st.write("")
         st.markdown("## Result")
@@ -436,4 +474,7 @@ if calculate:
                 st.link_button("Email us directly", f"mailto:{CONTACT_EMAIL}", width="stretch")
 
 st.markdown("---")
-st.caption(f"Questions: {CONTACT_EMAIL}")
+st.markdown(
+    f'<div class="footer-note">Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></div>',
+    unsafe_allow_html=True
+)
