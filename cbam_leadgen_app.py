@@ -466,6 +466,10 @@ if calculate:
 
 st.markdown("---")
 st.markdown(
+    '<div class="footer-note">Built by a data analyst focused on carbon, LCA, and CBAM workflow design.</div>',
+    unsafe_allow_html=True
+)
+st.markdown(
     f'<div class="footer-note">Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></div>',
     unsafe_allow_html=True
 )
