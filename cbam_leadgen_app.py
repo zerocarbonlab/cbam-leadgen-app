@@ -64,13 +64,15 @@ CUSTOM_CSS = """
         font-weight: 700;
         line-height: 1.1;
     }
-    .mini-cta {
-        border: 1px solid #e5e9e7;
-        border-radius: 14px;
-        background: #fbfcfc;
-        padding: 0.9rem 1rem;
-        margin-top: 0.55rem;
-        margin-bottom: 0.65rem;
+    .inline-cta-title {
+        color: #2a2f3a;
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin-top: 0.35rem;
+        margin-bottom: 0.45rem;
+    }
+    .button-spacer {
+        height: 2.1rem;
     }
     .footer-note {
         color: #74807c;
@@ -307,36 +309,34 @@ st.markdown(
     '<div class="subtle">Fast default-value screening for CBAM goods.</div>',
     unsafe_allow_html=True
 )
-st.markdown(
-    '<span class="tag">2026+ regime</span>'
-    '<span class="tag">Country + HS code</span>'
-    '<span class="tag">Email follow-up</span>',
-    unsafe_allow_html=True
-)
-
 st.markdown("## Start your estimate")
 
 countries = sorted([c for c in df["country"].dropna().unique() if str(c).strip()])
 default_country = infer_default_country(countries)
 default_country_index = countries.index(default_country) if default_country in countries else None
 
-left, right = st.columns([1.25, 1])
+top_left, top_right = st.columns([1.25, 1])
 
-with left:
+with top_left:
     country = st.selectbox(
         "Country of origin",
         countries,
         index=default_country_index,
         placeholder="Select country"
     )
+
+with top_right:
+    quantity_text = st.text_input("Quantity (tonnes)", placeholder="e.g. 10")
+
+bottom_left, bottom_right = st.columns([1.25, 1])
+
+with bottom_left:
     hs_code = st.text_input("HS code", placeholder="e.g. 72026000")
 
-with right:
-    quantity_text = st.text_input("Quantity (tonnes)", placeholder="e.g. 10")
-    st.write("")
+with bottom_right:
+    st.markdown('<div class="button-spacer"></div>', unsafe_allow_html=True)
     calculate = st.button("Estimate CBAM emissions", type="primary", width="stretch")
 
-# compact lead capture directly under estimate
 lead_url = build_tally_url(
     TALLY_FORM_URL,
     help_type="More accurate CBAM estimate",
@@ -345,24 +345,15 @@ lead_url = build_tally_url(
     quantity=quantity_text or "",
     source="inline_lead_capture"
 )
-st.markdown('<div class="mini-cta">', unsafe_allow_html=True)
-st.markdown("Need a reporting-ready answer?")
+
+st.markdown('<div class="inline-cta-title">Need a reporting-ready answer?</div>', unsafe_allow_html=True)
 c1, c2 = st.columns(2)
 with c1:
     st.link_button("Get a more accurate CBAM report", lead_url, width="stretch")
 with c2:
     st.link_button("Email us directly", f"mailto:{CONTACT_EMAIL}", width="stretch")
-st.markdown('</div>', unsafe_allow_html=True)
 
-with st.expander("Methodology and limitations"):
-    st.markdown(
-        """
-- Uses the 2026+ definitive-regime logic only
-- Prefers the workbook’s 2026 default value where available
-- Falls back by sector scope: cement/fertilisers = total; iron and steel/aluminium/hydrogen = direct
-- Screening tool only, not a final filing engine
-        """
-    )
+st.caption("2026+ screening logic. For reporting-ready work, request a more accurate CBAM report.")
 
 if calculate:
     quantity = parse_quantity(quantity_text)
