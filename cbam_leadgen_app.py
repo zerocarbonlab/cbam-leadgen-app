@@ -30,7 +30,7 @@ CUSTOM_CSS = """
         font-size: 1rem;
         line-height: 1.45;
         margin-top: -0.1rem;
-        margin-bottom: 0.55rem;
+        margin-bottom: 0.25rem;
     }
     .micro {
         color: #73807c;
@@ -71,12 +71,13 @@ CUSTOM_CSS = """
         margin-top: 0.35rem;
         margin-bottom: 0.45rem;
     }
-    .button-spacer {
-        height: 2.1rem;
+    .field-label-spacer {
+        height: 1.9rem;
     }
     .footer-note {
         color: #74807c;
         font-size: 0.92rem;
+        margin-top: 0.2rem;
     }
 </style>
 """
@@ -305,10 +306,6 @@ def choose_definitive_factor(row):
 df = load_data()
 
 st.title("Free CBAM Calculator for EU Imports")
-st.markdown(
-    '<div class="subtle">Fast default-value screening for CBAM goods.</div>',
-    unsafe_allow_html=True
-)
 st.markdown("## Start your estimate")
 
 countries = sorted([c for c in df["country"].dropna().unique() if str(c).strip()])
@@ -334,7 +331,7 @@ with bottom_left:
     hs_code = st.text_input("HS code", placeholder="e.g. 72026000")
 
 with bottom_right:
-    st.markdown('<div class="button-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="field-label-spacer"></div>', unsafe_allow_html=True)
     calculate = st.button("Estimate CBAM emissions", type="primary", width="stretch")
 
 lead_url = build_tally_url(
@@ -353,7 +350,6 @@ with c1:
 with c2:
     st.link_button("Email us directly", f"mailto:{CONTACT_EMAIL}", width="stretch")
 
-st.caption("2026+ screening logic. For reporting-ready work, request a more accurate CBAM report.")
 
 if calculate:
     quantity = parse_quantity(quantity_text)
@@ -464,12 +460,7 @@ if calculate:
             with d2:
                 st.link_button("Email us directly", f"mailto:{CONTACT_EMAIL}", width="stretch")
 
-st.markdown("---")
 st.markdown(
-    '<div class="footer-note">Built by a data analyst focused on carbon, LCA, and CBAM workflow design.</div>',
-    unsafe_allow_html=True
-)
-st.markdown(
-    f'<div class="footer-note">Questions: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></div>',
+    f'<div class="footer-note">Built by a data analyst focused on carbon, LCA, and CBAM workflow design. · <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></div>',
     unsafe_allow_html=True
 )
