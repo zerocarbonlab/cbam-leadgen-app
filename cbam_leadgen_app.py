@@ -458,16 +458,11 @@ if calculate:
             with d:
                 render_result_box("Indicative CBAM cost", f"€{indicative_cbam_cost:,.0f}", f"at €{current_eua_price:,.2f} / tCO2e")
 
-            source_text = f"EUA price source: {price_info['source']} (cached daily)."
             if price_info["is_fallback"]:
-                source_text = f"EUA price source: {price_info['source']} (€{current_eua_price:,.2f}/tCO2e) because live fetch failed."
-
-            cost_note = (
-                f"Indicative cost only: estimated emissions × current EUA price (€{current_eua_price:,.2f}/tCO2e). "
-                f"Excludes any recognised carbon price paid overseas and product-specific compliance adjustments. "
-                f"{source_text}"
-            )
-            st.caption(f"{factor_note} {cost_note}" if factor_note else cost_note)
+                note_text = f"Indicative only. Using fallback EUA price (€{current_eua_price:,.2f}/tCO2e)."
+            else:
+                note_text = f"Indicative only. Based on current EUA price (€{current_eua_price:,.2f}/tCO2e, cached daily)."
+            st.caption(note_text)
 
             result_tally_url = build_tally_url(
                 TALLY_FORM_URL,
