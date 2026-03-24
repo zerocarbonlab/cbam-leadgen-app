@@ -1,7 +1,10 @@
 
-import pandas as pd
-import streamlit as st
+import re
 from urllib.parse import urlencode
+
+import pandas as pd
+import requests
+import streamlit as st
 
 st.set_page_config(
     page_title="CBAM Calculator for EU Imports",
@@ -12,6 +15,9 @@ st.set_page_config(
 DATA_FILE = "webapp_master_lookup.csv"
 TALLY_FORM_URL = "https://tally.so/r/b5LV5e"
 CONTACT_EMAIL = "zerocarbonlab@gmail.com"
+
+# Fallback price used only if live fetch fails.
+DEFAULT_EUA_PRICE_EUR_PER_TCO2 = 69.08
 
 CUSTOM_CSS = """
 <style>
@@ -263,7 +269,7 @@ def safe_num(row, *cols):
 def choose_definitive_factor(row):
     """
     Definitive regime (2026 onwards):
-    - Prefer the official 2026 default value field from the user's workbook.
+    - Prefer the official 2026 default value field from the workbook.
     - If unavailable, fall back by sector/focus:
       * cement, fertilisers -> total
       * iron_and_steel, aluminium, hydrogen, electricity -> direct
@@ -303,7 +309,67 @@ def choose_definitive_factor(row):
 
     return None, "Factor", ""
 
+def _fetch_text(url: str) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    response = requests.get(url, headers=headers, timeout=12)
+    response.raise_for_status()
+    return response.text
+
+def _parse_tradingeconomics_price(text: str):
+    patterns = [
+        r"EU Carbon Permits traded at\s*([0-9]+(?:\.[0-9]+)?)",
+        r'"price"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+        r'"close"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    return None
+
+def _parse_investing_price(text: str):
+    patterns = [
+        r'The current price of Carbon Emissions futures is\s*([0-9]+(?:\.[0-9]+)?)',
+        r'"last"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    return None
+
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def get_current_eua_price():
+    sources = [
+        ("TradingEconomics", "https://tradingeconomics.com/eecxm:ind", _parse_tradingeconomics_price),
+        ("Investing.com", "https://www.investing.com/commodities/carbon-emissions", _parse_investing_price),
+    ]
+
+    for source_name, url, parser in sources:
+        try:
+            text = _fetch_text(url)
+            price = parser(text)
+            if price is not None and price > 0:
+                return {
+                    "price": float(price),
+                    "source": source_name,
+                    "is_fallback": False,
+                }
+        except Exception:
+            pass
+
+    return {
+        "price": DEFAULT_EUA_PRICE_EUR_PER_TCO2,
+        "source": "Manual fallback",
+        "is_fallback": True,
+    }
+
 df = load_data()
+price_info = get_current_eua_price()
+current_eua_price = float(price_info["price"])
 
 st.title("Free CBAM Calculator for EU Imports")
 st.markdown("## Start your estimate")
@@ -332,7 +398,7 @@ with bottom_left:
 
 with bottom_right:
     st.markdown('<div class="field-label-spacer"></div>', unsafe_allow_html=True)
-    calculate = st.button("Estimate CBAM emissions", type="primary", width="stretch")
+    calculate = st.button("Estimate CBAM emissions & cost", type="primary", width="stretch")
 
 lead_url = build_tally_url(
     TALLY_FORM_URL,
@@ -409,8 +475,9 @@ if calculate:
 
         else:
             emissions = quantity * float(factor_value)
+            indicative_cbam_cost = emissions * current_eua_price
 
-            a, b, c = st.columns(3)
+            a, b, c, d = st.columns(4)
             with a:
                 st.markdown(
                     '<div class="result-box"><div class="metric-label">'
@@ -434,9 +501,27 @@ if calculate:
                     + '</div><div class="micro">tCO2e</div></div>',
                     unsafe_allow_html=True
                 )
+            with d:
+                st.markdown(
+                    '<div class="result-box"><div class="metric-label">Indicative CBAM cost</div><div class="metric-value">'
+                    + f'€{indicative_cbam_cost:,.0f}'
+                    + '</div><div class="micro">at €{current_eua_price:,.2f} / tCO2e</div></div>',
+                    unsafe_allow_html=True
+                )
 
+            source_text = f"EUA price source: {price_info['source']} (cached daily)."
+            if price_info["is_fallback"]:
+                source_text = f"EUA price source: {price_info['source']} (€{current_eua_price:,.2f}/tCO2e) because live fetch failed."
+
+            cost_note = (
+                f"Indicative cost only: estimated emissions × current EUA price (€{current_eua_price:,.2f}/tCO2e). "
+                f"Excludes any recognised carbon price paid overseas and product-specific compliance adjustments. "
+                f"{source_text}"
+            )
             if factor_note:
-                st.caption(factor_note)
+                st.caption(f"{factor_note} {cost_note}")
+            else:
+                st.caption(cost_note)
 
             result_tally_url = build_tally_url(
                 TALLY_FORM_URL,
