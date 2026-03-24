@@ -16,7 +16,6 @@ DATA_FILE = "webapp_master_lookup.csv"
 TALLY_FORM_URL = "https://tally.so/r/b5LV5e"
 CONTACT_EMAIL = "zerocarbonlab@gmail.com"
 
-# Fallback price used only if live fetch fails.
 DEFAULT_EUA_PRICE_EUR_PER_TCO2 = 69.08
 
 CUSTOM_CSS = """
@@ -31,33 +30,21 @@ CUSTOM_CSS = """
         letter-spacing: -0.02em;
         margin-bottom: 0.35rem;
     }
-    .subtle {
-        color: #5f6c68;
-        font-size: 1rem;
-        line-height: 1.45;
-        margin-top: -0.1rem;
-        margin-bottom: 0.25rem;
-    }
     .micro {
         color: #73807c;
         font-size: 0.92rem;
         line-height: 1.45;
-    }
-    .tag {
-        display: inline-block;
-        padding: 0.23rem 0.58rem;
-        border-radius: 999px;
-        background: #eef5f1;
-        color: #2f6b59;
-        font-size: 0.82rem;
-        margin-right: 0.30rem;
-        margin-bottom: 0.30rem;
     }
     .result-box {
         border: 1px solid #e5e9e7;
         border-radius: 14px;
         background: #ffffff;
         padding: 0.9rem 1rem;
+        min-height: 150px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        box-sizing: border-box;
     }
     .metric-label {
         color: #6f7b77;
@@ -69,6 +56,13 @@ CUSTOM_CSS = """
         font-size: 1.75rem;
         font-weight: 700;
         line-height: 1.1;
+        margin-bottom: 0.3rem;
+    }
+    .metric-subline {
+        color: #73807c;
+        font-size: 0.92rem;
+        line-height: 1.35;
+        margin-top: auto;
     }
     .inline-cta-title {
         color: #2a2f3a;
@@ -222,7 +216,6 @@ def find_matches(df, country, hs_code):
 def infer_default_country(countries):
     if not countries:
         return None
-
     try:
         locale = getattr(st.context, "locale", None)
     except Exception:
@@ -237,11 +230,9 @@ def infer_default_country(countries):
             region = locale.split("_")[-1].upper()
         elif len(locale) == 2:
             region = locale.upper()
-
         candidate = REGION_TO_COUNTRY.get(region)
         if candidate in countries:
             return candidate
-
     return None
 
 def parse_quantity(qtext):
@@ -267,14 +258,6 @@ def safe_num(row, *cols):
     return None
 
 def choose_definitive_factor(row):
-    """
-    Definitive regime (2026 onwards):
-    - Prefer the official 2026 default value field from the workbook.
-    - If unavailable, fall back by sector/focus:
-      * cement, fertilisers -> total
-      * iron_and_steel, aluminium, hydrogen, electricity -> direct
-      * then safe fallback to any available factor
-    """
     factor_2026 = safe_num(row, "2026_default_value_including_markup")
     direct = safe_num(row, "calculator_direct_factor_tco2e_per_ton", "direct_emission_factor_tco2e_per_ton")
     indirect = safe_num(row, "calculator_indirect_factor_tco2e_per_ton", "indirect_emission_factor_tco2e_per_ton")
@@ -347,25 +330,25 @@ def get_current_eua_price():
         ("TradingEconomics", "https://tradingeconomics.com/eecxm:ind", _parse_tradingeconomics_price),
         ("Investing.com", "https://www.investing.com/commodities/carbon-emissions", _parse_investing_price),
     ]
-
     for source_name, url, parser in sources:
         try:
             text = _fetch_text(url)
             price = parser(text)
             if price is not None and price > 0:
-                return {
-                    "price": float(price),
-                    "source": source_name,
-                    "is_fallback": False,
-                }
+                return {"price": float(price), "source": source_name, "is_fallback": False}
         except Exception:
             pass
+    return {"price": DEFAULT_EUA_PRICE_EUR_PER_TCO2, "source": "Manual fallback", "is_fallback": True}
 
-    return {
-        "price": DEFAULT_EUA_PRICE_EUR_PER_TCO2,
-        "source": "Manual fallback",
-        "is_fallback": True,
-    }
+def render_result_box(label: str, value: str, subline: str):
+    html = (
+        '<div class="result-box">'
+        f'<div class="metric-label">{label}</div>'
+        f'<div class="metric-value">{value}</div>'
+        f'<div class="metric-subline">{subline}</div>'
+        '</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 df = load_data()
 price_info = get_current_eua_price()
@@ -379,23 +362,14 @@ default_country = infer_default_country(countries)
 default_country_index = countries.index(default_country) if default_country in countries else None
 
 top_left, top_right = st.columns([1.25, 1])
-
 with top_left:
-    country = st.selectbox(
-        "Country of origin",
-        countries,
-        index=default_country_index,
-        placeholder="Select country"
-    )
-
+    country = st.selectbox("Country of origin", countries, index=default_country_index, placeholder="Select country")
 with top_right:
     quantity_text = st.text_input("Quantity (tonnes)", placeholder="e.g. 10")
 
 bottom_left, bottom_right = st.columns([1.25, 1])
-
 with bottom_left:
     hs_code = st.text_input("HS code", placeholder="e.g. 72026000")
-
 with bottom_right:
     st.markdown('<div class="field-label-spacer"></div>', unsafe_allow_html=True)
     calculate = st.button("Estimate CBAM emissions & cost", type="primary", width="stretch")
@@ -415,7 +389,6 @@ with c1:
     st.link_button("Get a more accurate CBAM report", lead_url, width="stretch")
 with c2:
     st.link_button("Email us directly", f"mailto:{CONTACT_EMAIL}", width="stretch")
-
 
 if calculate:
     quantity = parse_quantity(quantity_text)
@@ -442,7 +415,6 @@ if calculate:
             source="no_match_result"
         )
         st.link_button("Get HS code support", no_match_tally_url, width="stretch")
-
     else:
         if len(matches) > 1:
             option_labels = [
@@ -472,42 +444,19 @@ if calculate:
                 source="not_calculator_ready"
             )
             st.link_button("Request support", support_tally_url, width="stretch")
-
         else:
             emissions = quantity * float(factor_value)
             indicative_cbam_cost = emissions * current_eua_price
 
             a, b, c, d = st.columns(4)
             with a:
-                st.markdown(
-                    '<div class="result-box"><div class="metric-label">'
-                    + factor_label +
-                    '</div><div class="metric-value">'
-                    + f'{float(factor_value):,.4g}'
-                    + '</div><div class="micro">tCO2e / tonne</div></div>',
-                    unsafe_allow_html=True
-                )
+                render_result_box(factor_label, f"{float(factor_value):,.4g}", "tCO2e / tonne")
             with b:
-                st.markdown(
-                    '<div class="result-box"><div class="metric-label">Quantity</div><div class="metric-value">'
-                    + f'{quantity:,.4g}'
-                    + '</div><div class="micro">tonnes</div></div>',
-                    unsafe_allow_html=True
-                )
+                render_result_box("Quantity", f"{quantity:,.4g}", "tonnes")
             with c:
-                st.markdown(
-                    '<div class="result-box"><div class="metric-label">Estimated emissions</div><div class="metric-value">'
-                    + f'{emissions:,.4g}'
-                    + '</div><div class="micro">tCO2e</div></div>',
-                    unsafe_allow_html=True
-                )
+                render_result_box("Estimated emissions", f"{emissions:,.4g}", "tCO2e")
             with d:
-                st.markdown(
-                    '<div class="result-box"><div class="metric-label">Indicative CBAM cost</div><div class="metric-value">'
-                    + f'€{indicative_cbam_cost:,.0f}'
-                    + '</div><div class="micro">at €{current_eua_price:,.2f} / tCO2e</div></div>',
-                    unsafe_allow_html=True
-                )
+                render_result_box("Indicative CBAM cost", f"€{indicative_cbam_cost:,.0f}", f"at €{current_eua_price:,.2f} / tCO2e")
 
             source_text = f"EUA price source: {price_info['source']} (cached daily)."
             if price_info["is_fallback"]:
@@ -518,10 +467,7 @@ if calculate:
                 f"Excludes any recognised carbon price paid overseas and product-specific compliance adjustments. "
                 f"{source_text}"
             )
-            if factor_note:
-                st.caption(f"{factor_note} {cost_note}")
-            else:
-                st.caption(cost_note)
+            st.caption(f"{factor_note} {cost_note}" if factor_note else cost_note)
 
             result_tally_url = build_tally_url(
                 TALLY_FORM_URL,
@@ -536,9 +482,7 @@ if calculate:
 
             st.write("")
             st.markdown("## Need more than a screening estimate?")
-            st.markdown(
-                "Need supplier-specific support, HS code review, or a more accurate estimate? Leave your details and we’ll follow up by email."
-            )
+            st.markdown("Need supplier-specific support, HS code review, or a more accurate estimate? Leave your details and we’ll follow up by email.")
             d1, d2 = st.columns(2)
             with d1:
                 st.link_button("Get a more accurate CBAM report", result_tally_url, width="stretch")
